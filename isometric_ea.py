@@ -177,7 +177,7 @@ def eval_pop(pop_embs, pop_model, env, **kwargs):
     #p.join()
     #int(0.66 * mp.cpu_count())
     import pdb; pdb.set_trace()
-    with mp.Pool(processes=20) as pool:
+    with mp.Pool(processes=6) as pool:
         scores = pool.starmap_async(score_fitness, arg_iter).get()
     #for i in range(len(pop_embs)):
     #    scores[i] += score_fitness(pop_embs[i], **kwargs)

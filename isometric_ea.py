@@ -37,8 +37,7 @@ from models.pop_model import PopModel, GoalPolicyWrapper
 from models.agent import GoalDirectedStochPolicy
 from models.rl.goal_directed_rl import GoalMDPWrapper, get_goal_mdp_wrapper
 
-#device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def main(env_name, pop_model_name=None,
          pop_size=100, n_generations=5000, max_ep_len=100, opt_cls='Adam',
@@ -79,12 +78,13 @@ def main(env_name, pop_model_name=None,
 
     # Get MDP to train on
     env_path = os.path.join(save_dir, 'env')
-    if not os.path.exists(env_path):
-        env, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
-        env.save(env_path)
-    else:
-        _, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
-        env = GoalMDPWrapper.load(env_path)
+    env, obs_type, obs_dim, act_dim = get_mdp(env_name)
+    #if not os.path.exists(env_path):
+        #env, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
+        #env.save(env_path)
+    #else:
+        #_, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
+        #env = GoalMDPWrapper.load(env_path)
 
     # Get the population model
     pop_model = torch.load(os.path.join(pop_model_dir, 'pop_model')).to(device)
@@ -125,6 +125,7 @@ def run_ea(n_generations, pop_size, pop_model, env, save_dir=None, **kwargs):
 
     # Initialize population of embeddings    
     pop_embs = init_population(pop_model, pop_size)
+    import pdb; pdb.set_trace()
 
     for g in tqdm(range(n_generations)):
         # Learn embedding and reconstruction model
@@ -162,13 +163,13 @@ def new_generation(parent_pop_embs, scores, pop_size=100):
 def eval_pop(pop_embs, pop_model, env, **kwargs):
     
     assert issubclass(type(pop_embs), torch.Tensor)
-    #scores = torch.zeros(len(pop_embs))
+    scores = torch.zeros(len(pop_embs))
 
     #q = mp.Queue()
-    arg_iter = []
-    for i in range(len(pop_embs)):
+    #arg_iter = []
+    #for i in range(len(pop_embs)):
         #arg_iter.append({'emb': pop_embs[i], 'pop_model': pop_model, 'env': env})
-        arg_iter.append((pop_embs[i], pop_model, env))
+        #arg_iter.append((pop_embs[i], pop_model, env))
         #q.put({'emb': pop_embs[i], 'pop_model': pop_model, 'env': env})
 
     #p = mp.Process(target=score_fitness, kwargs=q)
@@ -176,11 +177,11 @@ def eval_pop(pop_embs, pop_model, env, **kwargs):
     #print(q.get())
     #p.join()
     #int(0.66 * mp.cpu_count())
-    import pdb; pdb.set_trace()
-    with mp.Pool(processes=6) as pool:
-        scores = pool.starmap_async(score_fitness, arg_iter).get()
-    #for i in range(len(pop_embs)):
-    #    scores[i] += score_fitness(pop_embs[i], **kwargs)
+    #import pdb; pdb.set_trace()
+    #with mp.Pool(processes=20) as pool:
+    #    scores = pool.starmap_async(score_fitness, arg_iter).get()
+    for i in tqdm(range(len(pop_embs))):
+        scores[i] += score_fitness(emb=pop_embs[i], pop_model=pop_model, env=env, **kwargs)
 
     return scores
 
@@ -196,9 +197,9 @@ def score_fitness(emb, pop_model, env, max_ep_len=30, n_reps=20, **kwargs):
 
 def play_episode(env, agent, max_ep_len, step_buffer=None, **kwargs):
 
-    assert issubclass(type(env), GoalMDPWrapper) and env.n_tasks == 1
-    obs, task_id = env.reset()
-    task_goal_obs = env.goal_states[task_id]
+    #assert issubclass(type(env), GoalMDPWrapper) and env.n_tasks == 1
+    obs = env.reset()
+    #task_goal_obs = env.goal_states[task_id]
 
     ep_len = 0
     done = False
@@ -212,6 +213,7 @@ def play_episode(env, agent, max_ep_len, step_buffer=None, **kwargs):
         # take action
         next_obs, reward, done, info = env.step(act)
 
+        '''
         obs_list.append(obs)
         act_list.append(act)
 
@@ -224,15 +226,15 @@ def play_episode(env, agent, max_ep_len, step_buffer=None, **kwargs):
             'done': done}
         if step_buffer is not None:
             step_buffer.add_item(deepcopy(step))
+        '''
 
         obs = deepcopy(next_obs)
         ep_len += 1
         ep_reward += reward
 
-    obs_list.append(obs)
-    return ep_reward, {'obs_list': obs_list,
-                       'act_list': act_list,
-                       'goal_obs': task_goal_obs}
+    #obs_list.append(obs)
+    return ep_reward, {}
+
 
 def select_children(parent_pop_embs, scores, pop_size, temp=1.):
     assert issubclass(type(parent_pop_embs), torch.Tensor) and issubclass(type(scores), torch.Tensor)
@@ -286,81 +288,6 @@ def plot_scores(scores=None, save_dir=None, save_name=None, batch_size=100, n_di
         plt.savefig(os.path.join(save_dir, 'scores'))
         plt.close()
 
-'''
-def save_trajectory(emb_model, obs_list, act_list, goal_obs, embs_pca, emb_mean, eigvecs, save_dir, **kwargs):
-
-    from matplotlib import pyplot as plt
-    from matplotlib.lines import Line2D
-    import numpy as np
-
-    with torch.no_grad():
-        traj_embs = [emb_model(obs.to(device).unsqueeze(0)).cpu().numpy() - emb_mean for obs in obs_list]
-        traj_embs_pca = [traj_emb.dot(eigvecs) for traj_emb in traj_embs]
-        goal_pca = (emb_model(goal_obs.to(device).unsqueeze(0)).cpu().numpy() - emb_mean).dot(eigvecs)
-
-    traj_embs_pca = np.concatenate(traj_embs_pca)
-
-    # Save first obs and goal obs
-    plt.imshow(obs_list[0].cpu().numpy().transpose([1,2,0]))
-    plt.savefig(os.path.join(save_dir, 'start_obs'))
-    plt.close()
-    plt.imshow(goal_obs.cpu().numpy().transpose([1,2,0]))
-    plt.savefig(os.path.join(save_dir, 'goal_obs'))
-    plt.close()
-
-    # plotting all together
-    for i in range(traj_embs_pca.shape[0]):
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2,2)
-        x, y = list(traj_embs_pca[:,0]), list(traj_embs_pca[:, 1])
-        line = Line2D(x, y)
-        ax2.add_line(line)
-        ax2.set_xlim(min(list(embs_pca[:,0]))-1, max(list(embs_pca[:,0]))+1)
-        ax2.set_ylim(min(list(embs_pca[:,1]))-1, max(list(embs_pca[:,1]))+1)
-        ax2.scatter(embs_pca[:,0], embs_pca[:,1],s=1)
-        ax2.scatter(traj_embs_pca[i,0], traj_embs_pca[i,1],c='red')
-        ax2.scatter(goal_pca[:,0], goal_pca[:,1],c='green')
-        #ax2.set_title('Trajectory Path Dims {}-{}'.format(0, 1))
-        ax2.set_xlabel('PCA Dim 0')
-        ax2.set_ylabel('PCA Dim 1')
-        #ax2.tick_params(axis='both', which='both', bottom='off', top='off', right='off', left='off', labelbottom='off', labelleft='off')
-        ax2.set_xticks([])
-        ax2.set_yticks([])
-        x, y = list(traj_embs_pca[:,0]), list(traj_embs_pca[:, 2])
-        line = Line2D(x, y)
-        ax3.add_line(line)
-        ax3.set_xlim(min(list(embs_pca[:,0]))-1, max(list(embs_pca[:,0]))+1)
-        ax3.set_ylim(min(list(embs_pca[:,2]))-1, max(list(embs_pca[:,2]))+1)
-        ax3.scatter(embs_pca[:,0], embs_pca[:,2],s=1)
-        ax3.scatter(traj_embs_pca[i,0], traj_embs_pca[i,2],c='red')
-        ax3.scatter(goal_pca[:,0], goal_pca[:,2],c='green')
-        #ax3.set_title('Trajectory Path Dims {}-{}'.format(0, 2))
-        ax3.set_xlabel('PCA Dim 0')
-        ax3.set_ylabel('PCA Dim 2')
-        #ax3.tick_params(axis='both', which='both', bottom='off', top='off', right='off', left='off', labelbottom='off', labelleft='off')
-        ax3.set_xticks([])
-        ax3.set_yticks([])
-        x, y = list(traj_embs_pca[:,1]), list(traj_embs_pca[:, 2])
-        line = Line2D(x, y)
-        ax4.add_line(line)
-        ax4.set_xlim(min(list(embs_pca[:,1]))-1, max(list(embs_pca[:,1]))+1)
-        ax4.set_ylim(min(list(embs_pca[:,2]))-1, max(list(embs_pca[:,2]))+1)
-        ax4.scatter(embs_pca[:,1], embs_pca[:,2],s=1)
-        ax4.scatter(traj_embs_pca[i,1], traj_embs_pca[i,2],c='red')
-        ax4.scatter(goal_pca[:,1], goal_pca[:,2],c='green')
-        #ax4.set_title('Trajectory Path Dims {}-{}'.format(1, 2))
-        ax4.set_xlabel('PCA Dim 1')
-        ax4.set_ylabel('PCA Dim 2')
-        #ax4.tick_params(axis='both', which='both', bottom='off', top='off', right='off', left='off', labelbottom='off', labelleft='off')
-        ax4.set_xticks([])
-        ax4.set_yticks([])
-        ax1.imshow(obs_list[i].cpu().numpy().transpose([1,2,0]))
-        ax1.set_xlabel('MDP State')
-        #ax1.tick_params(axis='both', which='both', bottom='off', top='off', right='off', left='off', labelbottom='off', labelleft='off')
-        ax1.set_xticks([])
-        ax1.set_yticks([])
-        plt.savefig(os.path.join(save_dir, 'pca_emb_trajectory_states_{}'.format(i)))
-        plt.close()
-'''
 
 def save_trajectory(emb_model, obs_list, act_list, goal_obs, embs_pca, emb_mean, eigvecs, save_dir, **kwargs):
 

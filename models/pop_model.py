@@ -23,6 +23,7 @@ class PopModel(torch.nn.Module):
         self.emb_model = self.emb_space.mapping
         self.emb_dim = self.emb_model.emb_dim
         self.pop_size = self.emb_model.inp_dim
+        self.pop_embs = self.emb_model.model.weight.data
 
         assert issubclass(type(metric), AgentMetric)
         self.metric = metric

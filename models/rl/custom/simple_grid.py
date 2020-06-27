@@ -66,13 +66,13 @@ class SimpleGrid(object):
 
 class SimpleGridGoal(SimpleGrid):
 
-    def __init__(self, size=4, dim=2):
+    def __init__(self, size=2, dim=2):
         super().__init__(size=size, dim=dim)
         self.goal_state = torch.tensor(np.random.choice(self.size, self.dim)).long()
 
     def _process_reward(self, obs, new_obs, act):
-        old_dist = (obs - self.goal_state).abs()
-        new_dist = (new_obs - self.goal_state).abs()
+        old_dist = (obs - self.goal_state).abs().sum()
+        new_dist = (new_obs - self.goal_state).abs().sum()
         return old_dist - new_dist
 
     def _process_done(self, obs, new_obs, act):

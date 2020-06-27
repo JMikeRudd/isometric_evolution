@@ -84,12 +84,13 @@ def main(env_name,
 
     # Get MDP to train on
     env_path = os.path.join(save_dir, 'env')
-    if not os.path.exists(env_path):
-        env, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
-        env.save(env_path)
-    else:
-        _, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
-        env = GoalMDPWrapper.load(env_path)
+    env, obs_type, obs_dim, act_dim = get_mdp(env_name)
+    # if not os.path.exists(env_path):
+    #     env, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
+    #     env.save(env_path)
+    # else:
+    #     _, obs_type, obs_dim, act_dim = get_goal_mdp_wrapper(env_name, n_tasks=1)
+    #     env = GoalMDPWrapper.load(env_path)
 
     # Distance between two policies is defined on unique obs
     # If unique obs and embeddings already exist load them, else generate some
@@ -105,49 +106,49 @@ def main(env_name,
                 unique_obs = torch.cat([unique_obs, new_obs.unsqueeze(0)])
 
     # Get distance metric
-    metric = JSDAgentMetric(unique_obs)
+    # metric = JSDAgentMetric(unique_obs)
 
-    # Get embedding model
-    emb_model = DiscreteEmbMapping(pop_size, emb_dim)
+    # # Get embedding model
+    # emb_model = DiscreteEmbMapping(pop_size, emb_dim)
 
-    # Get embedding space
-    emb_space = get_embedding_space(emb_space_type, emb_model)
+    # # Get embedding space
+    # emb_space = get_embedding_space(emb_space_type, emb_model)
 
-    # Get Birth Model (model to map embedding to policy over actions)
-    if state_emb_model_type == 'MLP':
-        assert obs_type == 'cont' and isinstance(obs_dim, int) and obs_dim > 0
-        layers = [obs_dim] + [state_emb_hidden_size] * state_emb_layers + [emb_dim]
-        state_emb_model = MLPEmbMapping(layers)
+    # # Get Birth Model (model to map embedding to policy over actions)
+    # if state_emb_model_type == 'MLP':
+    #     assert obs_type == 'cont' and isinstance(obs_dim, int) and obs_dim > 0
+    #     layers = [obs_dim] + [state_emb_hidden_size] * state_emb_layers + [emb_dim]
+    #     state_emb_model = MLPEmbMapping(layers)
 
-    elif state_emb_model_type == 'Conv':
-        assert obs_type == 'cont' and isinstance(obs_dim, tuple) and len(obs_dim) == 3
-        layers = [state_emb_hidden_size] * state_emb_layers + [emb_dim]
-        state_emb_model = ConvEmbMapping(obs_dim, layers)
+    # elif state_emb_model_type == 'Conv':
+    #     assert obs_type == 'cont' and isinstance(obs_dim, tuple) and len(obs_dim) == 3
+    #     layers = [state_emb_hidden_size] * state_emb_layers + [emb_dim]
+    #     state_emb_model = ConvEmbMapping(obs_dim, layers)
 
-    birth_model = GoalDirectedStochPolicy(
-        policy_model=MixedEmbMapping(
-            emb_model_dict={
-                'obs': state_emb_model,
-                'emb': IDEmbMapping(emb_dim)},
-                emb_dim=act_dim,
-                comb_model=MLPEmbMapping([emb_dim + state_emb_model.emb_dim,
-                                          birth_model_hs,
-                                          int(birth_model_hs / 2),
-                                          act_dim], batch_norm=False)))
+    # birth_model = GoalDirectedStochPolicy(
+    #     policy_model=MixedEmbMapping(
+    #         emb_model_dict={
+    #             'obs': state_emb_model,
+    #             'emb': IDEmbMapping(emb_dim)},
+    #             emb_dim=act_dim,
+    #             comb_model=MLPEmbMapping([emb_dim + state_emb_model.emb_dim,
+    #                                       birth_model_hs,
+    #                                       int(birth_model_hs / 2),
+    #                                       act_dim], batch_norm=False)))
 
-    # Get the population model tying them together
-    pop_model = PopModel(emb_space, metric, birth_model).to(device)
+    # # Get the population model tying them together
+    # pop_model = PopModel(emb_space, metric, birth_model).to(device)
 
-    # Declare optimizers
-    optims = {}
-    if opt_cls == 'Adam':
-        optims['emb_model'] = Adam(emb_model.parameters(), lr=isom_lr)
-        optims['birth_model'] = Adam(birth_model.parameters(), lr=birth_lr)
-    elif opt_cls == 'SGD':
-        optims['emb_model'] = SGD(emb_model.parameters(), lr=isom_lr)
-        optims['birth_model'] = SGD(birth_model.parameters(), lr=birth_lr)
-    else:
-        raise ValueError('{} not a supported opt_cls'.format(opt_cls))
+    # # Declare optimizers
+    # optims = {}
+    # if opt_cls == 'Adam':
+    #     optims['emb_model'] = Adam(emb_model.parameters(), lr=isom_lr)
+    #     optims['birth_model'] = Adam(birth_model.parameters(), lr=birth_lr)
+    # elif opt_cls == 'SGD':
+    #     optims['emb_model'] = SGD(emb_model.parameters(), lr=isom_lr)
+    #     optims['birth_model'] = SGD(birth_model.parameters(), lr=birth_lr)
+    # else:
+    #     raise ValueError('{} not a supported opt_cls'.format(opt_cls))
 
     '''
     learn_embedding(pop_model, isom_epochs=isom_epochs, isom_bs=isom_bs,
@@ -155,19 +156,111 @@ def main(env_name,
                     optims=optims, save_dir=save_dir)
     '''
 
-    # Get Initial Embs
-    pop_embs, pop_distns = pop_model.init_embs(epochs=isom_epochs, bs=isom_bs, optim=optims['emb_model'], save_dir=save_dir)
+    # # Get Initial Embs
+    # pop_embs, pop_distns = pop_model.init_embs(epochs=isom_epochs, bs=isom_bs, optim=optims['emb_model'], save_dir=save_dir)
 
-    # Train Birth Model
-    train_birth_model(pop_model.birth_model,
-                      obs=unique_obs,
-                      embs=pop_embs.to(device),
-                      pop_distns=pop_distns.to(device),
-                      optim=optims['birth_model'], epochs=birth_epochs, bs= birth_bs,
-                      save_dir=save_dir, save_every=save_every, print_every=print_every)
+    # # Train Birth Model
+    # train_birth_model(pop_model.birth_model,
+    #                   obs=unique_obs,
+    #                   embs=pop_embs.to(device),
+    #                   pop_distns=pop_distns.to(device),
+    #                   optim=optims['birth_model'], epochs=birth_epochs, bs= birth_bs,
+    #                   save_dir=save_dir, save_every=save_every, print_every=print_every)
 
-    torch.save(pop_model, os.path.join(save_dir, 'pop_model'))
+    # torch.save(pop_model, os.path.join(save_dir, 'pop_model'))
+
+    pop_model = torch.load(os.path.join(save_dir, 'pop_model'))
+
+    # Make plots of emb space
+    pop_model_plots(pop_model, env, save_dir=save_dir)
+
+
+def pop_model_plots(pop_model, env, save_dir):
+
+    assert save_dir is not None
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     
+    # Plots of emb space coloured by score
+    emb_space_score_plots(pop_model, env, save_dir=os.path.join(save_dir, 'score_plots'))
+
+def emb_space_score_plots(pop_model, env, save_dir):
+    assert save_dir is not None
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    import pdb; pdb.set_trace()
+    from isometric_ea import eval_pop
+    pop_embs = pop_model.emb_model.model.weight.data
+
+    print('Computing Scores')
+    #pop_scores = eval_pop(pop_embs, pop_model=pop_model, env=env, max_ep_len=15, n_reps=10)
+
+    pop_scores = torch.load(os.path.join(save_dir, 'pop_scores'))
+    torch.save(pop_scores, os.path.join(save_dir, 'pop_scores'))
+
+    pop_embs, pop_scores = pop_embs.cpu().numpy(), pop_scores.cpu().numpy()
+
+    from matplotlib import pyplot as plt
+    print('Generating Emb Score Plots')
+    for i in tqdm(range(pop_model.emb_dim)):
+        for j in range(i+1, pop_model.emb_dim):
+            plt.scatter(pop_embs[:,i], pop_embs[:, j], s=1, c=pop_scores, cmap='hot_r')
+            plt.xticks([])
+            plt.yticks([])
+            plt.xlabel('Embedding Dimension {}'.format(i))
+            plt.ylabel('Embedding Dimension {}'.format(j))
+            plt.colorbar()
+            plt.title('Population Embeddings Coloured by Fitness')
+            #plt.legend(loc='lower right')
+            plt.savefig(os.path.join(save_dir, '{}_{}'.format(i,j)))
+            plt.close()
+
+    # Projecting onto direction of steepest ascent
+    from sklearn.linear_model import LinearRegression
+    reg_model = LinearRegression()
+    reg_model.fit(embs.cpu().numpy(), cols.cpu().numpy())
+    d1vec = torch.tensor(reg_model.coef_).to(device)
+    d1vec /= d1vec.norm()
+
+    d1 = embs.matmul(d1vec).cpu().numpy()
+
+    col_res = cols.cpu().numpy() - reg_model.predict(embs.cpu().numpy())
+    res_model = LinearRegression()
+    res_model.fit(embs.cpu().numpy(), col_res)
+    d2vec = torch.tensor(res_model.coef_).to(device)
+    d2vec -= d2vec.matmul(d1vec) * d1vec
+    d2vec /= d2vec.norm()
+
+    d2 = embs.matmul(d2vec).cpu().numpy()
+
+    from matplotlib import pyplot as plt
+    plt.scatter(d1, d2, c=cols.cpu().numpy(), cmap='hot_r')
+    title = 'Embs Realigned by {}'.format(col_field)
+    plt.title(title)
+    plt.colorbar()
+    plt.savefig(os.path.join(model_dir, pos, title))
+    plt.close()
+
+    # Histogram
+    n_bins = 20
+    bins = d1.min() + (d1.max() - d1.min()) / n_bins * torch.arange(n_bins + 1).float()
+    hist = torch.zeros(n_bins)
+    for i in range(n_bins):
+        b_mask = (bins[i] <= torch.tensor(d1)) * (torch.tensor(d1) < bins[i + 1])
+        hist[i] = cols.masked_select(b_mask).mean()
+
+
+    ax, fig = plt.subplots(1)
+    fig.bar(x=bins[:-1].cpu().numpy(), height=hist.cpu().numpy(), align='edge', width=(bins[1]-bins[0]).cpu().numpy())
+    title = 'Histogram of {} Along Aligned Axis'.format(col_field)
+    plt.ylabel('Avergae {}'.format(col_field))
+    plt.title(title)
+    plt.savefig(os.path.join(model_dir, pos, title))
+    plt.close()
+
+
+'''
 def learn_embedding(pop_model, optims, isom_epochs=10000, isom_bs=100,
                     birth_epochs=100, birth_bs=32, save_dir=None):
 
@@ -317,12 +410,11 @@ def plot_embs(emb_model, obs, save_dir=None, save_name=None, batch_size=100, n_d
 
     embs_pca, eigvals, eigvecs = pca(embs)
     #embs_pca = embs # must change
-    '''
-    U, S, V = np.linalg.svd(embs, full_matrices=False, compute_uv=True)
-    embs_svd = np.dot(U, np.diag(S))    
-    eigvals = S * S / (n_samples - 1)
-    '''
-
+    
+    #U, S, V = np.linalg.svd(embs, full_matrices=False, compute_uv=True)
+    #embs_svd = np.dot(U, np.diag(S))    
+    #eigvals = S * S / (n_samples - 1)
+    
     plt.bar([i for i in range(emb_dim)], eigvals)
     plt.savefig(os.path.join(eigval_save_dir, save_name))
     plt.close()
@@ -363,7 +455,7 @@ def plot_embs(emb_model, obs, save_dir=None, save_name=None, batch_size=100, n_d
         plt.savefig(os.path.join(save_dir, 'success_rate'))
         plt.close()
 
-'''
+
 def save_trajectory(emb_model, obs_list, act_list, goal_obs, embs_pca, emb_mean, eigvecs, save_dir, **kwargs):
 
     from matplotlib import pyplot as plt

@@ -68,7 +68,7 @@ class EuclideanMetric(Metric):
         super().__init__(dim)
 
     def _compute_dist(self, x, y):
-        return ((x - y) ** 2).sum(dim=-1)
+        return ((x - y) ** 2).sum(dim=-1).pow(0.5)
 
     def update_metric(self, batch):
         return {}

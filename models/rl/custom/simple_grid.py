@@ -75,5 +75,5 @@ class SimpleGridGoal(SimpleGrid):
         new_dist = (new_obs - self.goal_state).abs().sum()
         return old_dist - new_dist
 
-    def _process_done(self, obs, new_obs, act):
-        return (new_obs - self.goal_state).abs().sum() < 0.001
+    def _process_done(self, obs, new_obs, act, tol=0.001):
+        return (new_obs - self.goal_state).abs().sum() < tol or (obs - self.goal_state).abs().sum() < tol

@@ -106,49 +106,49 @@ def main(env_name,
                 unique_obs = torch.cat([unique_obs, new_obs.unsqueeze(0)])
 
     # Get distance metric
-    # metric = JSDAgentMetric(unique_obs)
+    metric = JSDAgentMetric(unique_obs)
 
-    # # Get embedding model
-    # emb_model = DiscreteEmbMapping(pop_size, emb_dim)
+    # Get embedding model
+    emb_model = DiscreteEmbMapping(pop_size, emb_dim)
 
-    # # Get embedding space
-    # emb_space = get_embedding_space(emb_space_type, emb_model)
+    # Get embedding space
+    emb_space = get_embedding_space(emb_space_type, emb_model)
 
-    # # Get Birth Model (model to map embedding to policy over actions)
-    # if state_emb_model_type == 'MLP':
-    #     assert obs_type == 'cont' and isinstance(obs_dim, int) and obs_dim > 0
-    #     layers = [obs_dim] + [state_emb_hidden_size] * state_emb_layers + [emb_dim]
-    #     state_emb_model = MLPEmbMapping(layers)
+    # Get Birth Model (model to map embedding to policy over actions)
+    if state_emb_model_type == 'MLP':
+        assert obs_type == 'cont' and isinstance(obs_dim, int) and obs_dim > 0
+        layers = [obs_dim] + [state_emb_hidden_size] * state_emb_layers + [emb_dim]
+        state_emb_model = MLPEmbMapping(layers)
 
-    # elif state_emb_model_type == 'Conv':
-    #     assert obs_type == 'cont' and isinstance(obs_dim, tuple) and len(obs_dim) == 3
-    #     layers = [state_emb_hidden_size] * state_emb_layers + [emb_dim]
-    #     state_emb_model = ConvEmbMapping(obs_dim, layers)
+    elif state_emb_model_type == 'Conv':
+        assert obs_type == 'cont' and isinstance(obs_dim, tuple) and len(obs_dim) == 3
+        layers = [state_emb_hidden_size] * state_emb_layers + [emb_dim]
+        state_emb_model = ConvEmbMapping(obs_dim, layers)
 
-    # birth_model = GoalDirectedStochPolicy(
-    #     policy_model=MixedEmbMapping(
-    #         emb_model_dict={
-    #             'obs': state_emb_model,
-    #             'emb': IDEmbMapping(emb_dim)},
-    #             emb_dim=act_dim,
-    #             comb_model=MLPEmbMapping([emb_dim + state_emb_model.emb_dim,
-    #                                       birth_model_hs,
-    #                                       int(birth_model_hs / 2),
-    #                                       act_dim], batch_norm=False)))
+    birth_model = GoalDirectedStochPolicy(
+        policy_model=MixedEmbMapping(
+            emb_model_dict={
+                'obs': state_emb_model,
+                'emb': IDEmbMapping(emb_dim)},
+                emb_dim=act_dim,
+                comb_model=MLPEmbMapping([emb_dim + state_emb_model.emb_dim,
+                                          birth_model_hs,
+                                          int(birth_model_hs / 2),
+                                          act_dim], batch_norm=False)))
 
-    # # Get the population model tying them together
-    # pop_model = PopModel(emb_space, metric, birth_model).to(device)
+    # Get the population model tying them together
+    pop_model = PopModel(emb_space, metric, birth_model).to(device)
 
-    # # Declare optimizers
-    # optims = {}
-    # if opt_cls == 'Adam':
-    #     optims['emb_model'] = Adam(emb_model.parameters(), lr=isom_lr)
-    #     optims['birth_model'] = Adam(birth_model.parameters(), lr=birth_lr)
-    # elif opt_cls == 'SGD':
-    #     optims['emb_model'] = SGD(emb_model.parameters(), lr=isom_lr)
-    #     optims['birth_model'] = SGD(birth_model.parameters(), lr=birth_lr)
-    # else:
-    #     raise ValueError('{} not a supported opt_cls'.format(opt_cls))
+    # Declare optimizers
+    optims = {}
+    if opt_cls == 'Adam':
+        optims['emb_model'] = Adam(emb_model.parameters(), lr=isom_lr)
+        optims['birth_model'] = Adam(birth_model.parameters(), lr=birth_lr)
+    elif opt_cls == 'SGD':
+        optims['emb_model'] = SGD(emb_model.parameters(), lr=isom_lr)
+        optims['birth_model'] = SGD(birth_model.parameters(), lr=birth_lr)
+    else:
+        raise ValueError('{} not a supported opt_cls'.format(opt_cls))
 
     '''
     learn_embedding(pop_model, isom_epochs=isom_epochs, isom_bs=isom_bs,
@@ -156,18 +156,18 @@ def main(env_name,
                     optims=optims, save_dir=save_dir)
     '''
 
-    # # Get Initial Embs
-    # pop_embs, pop_distns = pop_model.init_embs(epochs=isom_epochs, bs=isom_bs, optim=optims['emb_model'], save_dir=save_dir)
+    # Get Initial Embs
+    pop_embs, pop_distns = pop_model.init_embs(epochs=isom_epochs, bs=isom_bs, optim=optims['emb_model'], save_dir=save_dir)
 
-    # # Train Birth Model
-    # train_birth_model(pop_model.birth_model,
-    #                   obs=unique_obs,
-    #                   embs=pop_embs.to(device),
-    #                   pop_distns=pop_distns.to(device),
-    #                   optim=optims['birth_model'], epochs=birth_epochs, bs= birth_bs,
-    #                   save_dir=save_dir, save_every=save_every, print_every=print_every)
+    # Train Birth Model
+    train_birth_model(pop_model.birth_model,
+                      obs=unique_obs,
+                      embs=pop_embs.to(device),
+                      pop_distns=pop_distns.to(device),
+                      optim=optims['birth_model'], epochs=birth_epochs, bs= birth_bs,
+                      save_dir=save_dir, save_every=save_every, print_every=print_every)
 
-    # torch.save(pop_model, os.path.join(save_dir, 'pop_model'))
+    torch.save(pop_model, os.path.join(save_dir, 'pop_model'))
 
     pop_model = torch.load(os.path.join(save_dir, 'pop_model'))
 
@@ -259,6 +259,9 @@ def emb_space_score_plots(pop_model, env, save_dir):
     plt.savefig(os.path.join(model_dir, pos, title))
     plt.close()
 
+    plt.scatter(d1, pop_scores)
+    plt.savefig(os.path.join(save_dir, 'scores_best_dim'))
+    plt.close()
 
 '''
 def learn_embedding(pop_model, optims, isom_epochs=10000, isom_bs=100,

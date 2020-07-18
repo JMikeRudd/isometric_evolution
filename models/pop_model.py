@@ -53,7 +53,7 @@ class PopModel(torch.nn.Module):
         pop_distns /= pop_distns.sum(dim=-1, keepdim=True)
 
         # Mix together so we have continuum of distributions but with weight close to 0 and 1
-        mix_weights = Beta(torch.tensor([0.25]), torch.tensor([0.25])).sample([self.pop_size]).unsqueeze(-1)
+        mix_weights = Beta(torch.tensor([0.75]), torch.tensor([0.75])).sample([self.pop_size]).unsqueeze(-1)
         mix_candidates = torch.randint(0, self.pop_size, [self.pop_size, 2])
         pop_distns = mix_weights * pop_distns[mix_candidates[:,0]] + (1- mix_weights) * pop_distns[mix_candidates[:,1]]
 

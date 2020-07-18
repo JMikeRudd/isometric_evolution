@@ -55,10 +55,10 @@ class SimpleGrid(object):
                 {})
 
     def _process_reward(self, obs, new_obs, act):
-        return 0
+        return 1 * ((new_obs - self.goal_state).abs().sum() < tol) -1
 
     def _process_done(self, obs, new_obs, act):
-        return False
+        return (new_obs - self.goal_state).abs().sum() < tol or (obs - self.goal_state).abs().sum() < tol
 
     def _process_obs(self, obs):
         return obs.float() # / float(self.size)
@@ -70,7 +70,8 @@ class SimpleGridGoal(SimpleGrid):
         super().__init__(size=size, dim=dim)
         self.goal_state = torch.tensor(np.random.choice(self.size, self.dim)).long()
 
-    def _process_reward(self, obs, new_obs, act):
+    def _process_reward(self, obs, new_obs, act, tol=0.001):
+        return 1 * ((new_obs - self.goal_state).abs().sum() < tol) -1
         old_dist = (obs - self.goal_state).abs().sum()
         new_dist = (new_obs - self.goal_state).abs().sum()
         return old_dist - new_dist

@@ -124,11 +124,12 @@ def run_ea(n_generations, pop_size, pop_model, env, save_dir=None, **kwargs):
     generation_scores = torch.zeros(n_generations)
     all_embs = torch.zeros((n_generations + 1, pop_size, pop_model.emb_dim))
     all_scores = torch.zeros((n_generations + 1, pop_size))
+    all_embs_flat = torch.zeros(((n_generations + 1) * pop_size, pop_model.emb_dim))
+    all_scores_flat = torch.zeros(((n_generations + 1) * pop_size))
+    momentums = torch.zeros(n_generations, pop_model.emb_dim)
 
     # Initialize population of embeddings
     pop_embs = init_population(pop_model, pop_size)
-    
-    all_embs[0] += pop_embs.clone().cpu()
 
     for g in tqdm(range(n_generations)):
         # Learn embedding and reconstruction model
@@ -137,24 +138,38 @@ def run_ea(n_generations, pop_size, pop_model, env, save_dir=None, **kwargs):
         # Evaluate fitenss scores
         scores = eval_pop(pop_embs, pop_model=pop_model, env=env, **kwargs)
 
-        logger.info('Mean Score: {}'.format(scores.mean()))
+        logger.info('Generation {} Mean Score: {}'.format(g, scores.mean()))
         generation_scores[g] += scores.mean()
         plot_scores(generation_scores[:g+1].cpu().numpy(), save_dir=save_dir, save_name=g)
 
         # Record pop embs and scores for graphing
-        all_embs[g + 1] += pop_embs.clone().cpu()
         all_scores[g] += scores.clone().cpu()
+        all_embs[g] += pop_embs.clone().cpu()
+        all_embs_flat[g * pop_size:(g+1) * pop_size] += pop_embs.clone().cpu()
+        all_scores_flat[g * pop_size:(g+1) * pop_size] += scores.clone().cpu()
+
+        # Get direction of steepest ascent
+        momentum_vec = get_momentum_vector(all_embs_flat[:(g+1) * pop_size], all_scores_flat[:(g+1) * pop_size])
+        momentums[g] += momentum_vec.clone()
 
         # Generate new population
-        pop_embs = new_generation_ascent(parent_pop_embs=pop_embs, scores=scores, pop_size=pop_size, emb_space=pop_model.emb_space)
+        pop_embs = new_generation_ascent(parent_pop_embs=pop_embs, scores=scores, pop_size=pop_size, momentum=momentum_vec)
 
     scores = eval_pop(pop_embs, pop_model=pop_model, env=env, **kwargs)
-    all_scores[-1] += scores.clone().cpu()
 
+    all_scores[-1] += scores.clone().cpu()
+    all_embs_flat[-pop_size:] += pop_embs.clone().cpu()
+    all_scores_flat[-pop_size:] += scores.clone().cpu()
+
+    torch.save(generation_scores, os.path.join(save_dir, 'generation_scores'))
     torch.save(all_scores, os.path.join(save_dir, 'all_scores'))
     torch.save(all_embs, os.path.join(save_dir, 'all_embs'))
+    torch.save(all_embs_flat, os.path.join(save_dir, 'all_embs_flat'))
+    torch.save(all_scores_flat, os.path.join(save_dir, 'all_scores_flat'))
+    torch.save(momentums, os.path.join(save_dir, 'momentums'))
     
-    plot_progression(all_embs.numpy(), all_scores.numpy(), save_dir=os.path.join(save_dir, 'training_progression'))
+    plot_progression(all_embs.numpy(), all_scores.numpy(), momentums=momentums.cpu().numpy(),
+                     save_dir=os.path.join(save_dir, 'training_progression'))
 
 
 def init_population(pop_model, pop_size):
@@ -166,14 +181,14 @@ def init_population(pop_model, pop_size):
 
     return all_embs[rand_inds]
 
-def new_generation_ascent(parent_pop_embs, scores, pop_size=100, emb_space=None):
+def new_generation_ascent(parent_pop_embs, scores, pop_size=100, momentum=None):
 
     assert issubclass(type(parent_pop_embs), torch.Tensor) and issubclass(type(scores), torch.Tensor)
     assert scores.dim() == 1 and len(scores) == len(parent_pop_embs)
 
     child_pop_embs = select_children(parent_pop_embs, scores, pop_size)
 
-    return mutate_ascent(child_pop_embs, scores, emb_space=emb_space, parent_pop_embs=parent_pop_embs)
+    return mutate_ascent(child_pop_embs, scores, momentum=momentum)
 
 def eval_pop(pop_embs, pop_model, env, **kwargs):
     
@@ -260,14 +275,17 @@ def select_children(parent_pop_embs, scores, pop_size, temp=1.):
 
     return selected_parents.mean(dim=1)
 
-def mutate_ascent(pop_embs, scores, stdev=0.03, step_size=0.01, emb_space=None, parent_pop_embs=None):
+def mutate_ascent(pop_embs, scores, stdev=0.03, step_size=0.01, momentum=None, **kwargs):
     assert issubclass(type(pop_embs), torch.Tensor)
     assert isinstance(stdev, float) and stdev > 0.
 
-    from models.embedding.utils import get_gradient_steepest_ascent
+    emb_dim = pop_embs.size(-1)
+    if momentum is not None:
+        mutation_mean = momentum
+    else:
+        mutation_mean = torch.zeros(emb_dim)
 
-    momentum = pop_embs.mean(dim=0) - parent_pop_embs.mean(dim=0)
-    mutation_mean = step_size * momentum
+    #from models.embedding.utils import get_gradient_steepest_ascent
     #ascent_vec, _ = get_gradient_steepest_ascent(embs=pop_embs.cpu().numpy(), signal=scores.cpu().numpy(), norm=True)
     #ascent_vec = torch.from_numpy(ascent_vec)
 
@@ -280,12 +298,20 @@ def mutate_ascent(pop_embs, scores, stdev=0.03, step_size=0.01, emb_space=None, 
     #     mutation_mean = step_size * ascent_vec
 
 
-
-    emb_dim = pop_embs.size(-1)
     mutation_dist = MultivariateNormal(loc=mutation_mean.cpu(),
                                        covariance_matrix=(stdev ** 2) * torch.eye(emb_dim))
 
     return pop_embs + mutation_dist.sample([pop_embs.size(0)]).to(pop_embs.device.type)
+
+def get_momentum_vector(pop_embs, scores, conf_thresh=0.1, step_size=0.03):
+    from models.embedding.utils import get_gradient_steepest_ascent
+    ascent_vec, _, p_val = get_gradient_steepest_ascent(embs=pop_embs.cpu().numpy(),
+                                                       signal=scores.cpu().numpy(), norm=True)
+    if p_val < conf_thresh:
+        return torch.from_numpy(step_size * ascent_vec)
+    else:
+        return torch.zeros(ascent_vec.shape[0])
+
 
 def plot_scores(scores=None, save_dir=None, save_name=None, batch_size=100, n_dims=2,
                 plt_trajectory=False, env=None, agent=None):
@@ -320,7 +346,7 @@ def plot_scores(scores=None, save_dir=None, save_name=None, batch_size=100, n_di
         plt.savefig(os.path.join(save_dir, 'scores'))
         plt.close()
 
-def plot_progression(all_embs, all_scores, save_dir=None):
+def plot_progression(all_embs, all_scores, momentums, save_dir=None):
     
     assert save_dir is not None
     if not os.path.exists(save_dir):
@@ -351,7 +377,8 @@ def plot_progression(all_embs, all_scores, save_dir=None):
     for g in tqdm(range(n_gens)):
         # Plot all old embs first
         plt.clf()
-        fig, (ax1, ax2) = plt.subplots(1,2)
+        #fig, (ax1, ax2) = plt.subplots(1,2)
+        fig, ax1 = plt.subplots(1)
         ax1.scatter(embs_pca[:g*pop_size,0], embs_pca[:g*pop_size, 1], s=1, c=all_scores_flat[:g*pop_size], cmap='hot_r')
 
         # Plot current generation
@@ -359,16 +386,21 @@ def plot_progression(all_embs, all_scores, save_dir=None):
                     s=1, c=all_scores_flat[g*pop_size:(g+1)*pop_size], cmap='hot_r', edgecolors='black')
 
         #import pdb; pdb.set_trace()
-        trail_len = 0
-        min_ind = 0 #if g < trail_len else g - trail_len
-        [I, J] = [list(idx) for idx in zip(*list(combinations(range(pop_size), 2)))]
-        max_dist = np.linalg.norm((all_embs_flat[min_ind*pop_size:(g+1)*pop_size][I], all_embs_flat[min_ind*pop_size:(g+1)*pop_size][J])).max()
-        step_size = 0.1 * max_dist
-        ascent_vec, _ = get_gradient_steepest_ascent(embs=all_embs_flat[min_ind*pop_size:(g+1)*pop_size], signal=all_scores_flat[min_ind*pop_size:(g+1)*pop_size], norm=False)
-        ascent_vec = np.dot(step_size * ascent_vec, eig_vecs)
+        # trail_len = 0
+        # min_ind = 0 #if g < trail_len else g - trail_len
+        # [I, J] = [list(idx) for idx in zip(*list(combinations(range(pop_size), 2)))]
+        # max_dist = 1 #np.linalg.norm((all_embs_flat[min_ind*pop_size:(g+1)*pop_size][I], all_embs_flat[min_ind*pop_size:(g+1)*pop_size][J])).max()
+        # step_size = 0.1 * max_dist
+        # ascent_vec, _ = get_gradient_steepest_ascent(embs=all_embs_flat[min_ind*pop_size:(g+1)*pop_size], signal=all_scores_flat[min_ind*pop_size:(g+1)*pop_size], norm=True)
+        # ascent_vec = np.dot(step_size * ascent_vec, eig_vecs)
 
         arrow_start = embs_pca[g*pop_size:(g+1)*pop_size].mean(axis=0)
-        dx, dy = step_size * ascent_vec[0], step_size * ascent_vec[1]
+        if g < n_gens - 1:
+            momentum_pca = (momentums[g] - emb_mean).dot(eig_vecs)
+        else:
+            momentum_pca = np.zeros(2)
+
+        dx, dy = momentum_pca[0], momentum_pca[1]
         ax1.arrow(x=arrow_start[0], y=arrow_start[1], dx=dx, dy=dy)
 
         ax1.set_xlim(x_lim)
@@ -377,16 +409,16 @@ def plot_progression(all_embs, all_scores, save_dir=None):
         ax1.set_xticks([])
         ax1.set_yticks([])
 
-        ax2.plot([i for i in range(g + 1)], avg_scores[:(g+1)], c='r')
-        # ['b'] * (g + 1) + ['w'] * (n_gens - g - 1)
-        ax2.set_xlim((0, n_gens))
-        ax2.set_ylim((-0.1, 1.1))
-        ax2.set_xticks([])
-        ax2.set_yticks([])
+        # ax2.plot([i for i in range(g + 1)], avg_scores[:(g+1)], c='r')
+        # # ['b'] * (g + 1) + ['w'] * (n_gens - g - 1)
+        # ax2.set_xlim((0, n_gens))
+        # ax2.set_ylim((-0.1, 1.1))
+        # ax2.set_xticks([])
+        # ax2.set_yticks([])
 
         fig.suptitle('Training Progression')
         fig.text(0.5, 0.01, 'Generation {}'.format(g), va='bottom', ha='center')
-        fig.set_figwidth(12)
+        fig.set_figwidth(8)
         fig.set_figheight(4)
         
         plt.savefig(os.path.join(save_dir, 'gen_{}'.format(g)))

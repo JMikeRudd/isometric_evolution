@@ -39,7 +39,7 @@ from models.rl.goal_directed_rl import GoalMDPWrapper, get_goal_mdp_wrapper
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def main(env_name, pop_model_name=None,
+def main(env_name, n_exp_reps=10, pop_model_name=None,
          pop_size=100, n_generations=5000, max_ep_len=100, opt_cls='Adam',
          unique_samples=2000, isom_epochs=10000, isom_bs=32, isom_lr=0.001,
          model_dir=None, name=None, save_every=5, print_every=1, seed=None, plt=False):
@@ -90,23 +90,20 @@ def main(env_name, pop_model_name=None,
     pop_model = torch.load(os.path.join(pop_model_dir, 'pop_model')).to(device)
     torch.save(pop_model, os.path.join(save_dir, 'pop_model'))
 
-    '''
-    # Declare optimizer
-    optims = {}
-    if opt_cls == 'Adam':
-        optims['policy'] = Adam(policy.parameters(), lr=policy_lr        optims['value'] = Adam(value_fn.parameters(), lr=value_lr)
-    elif opt_cls == 'SGD':
-        optims['policy'] = SGD(policy.parameters(), lr=policy_lr)
-        optims['value'] = SGD(value_fn.parameters(), lr=value_lr)
-    else:
-        raise ValueError('{} not a supported opt_cls'.format(opt_cls))
-    '''
+    # Solve MDP with EA
+    #run_ea(n_generations, pop_size, pop_model, env, save_dir=rep_save_dir)
+    
+    # Experiment
+    all_scores = torch.zeros(n_exp_reps, n_generations)
+    for i in range(n_exp_reps):
+        rep_save_dir = os.path.join(save_dir, str(i))
+        if not os.path.exists(rep_save_dir):
+            os.makedirs(rep_save_dir)
+        rep_scores = run_ea(n_generations, pop_size, pop_model, env, save_dir=rep_save_dir)
+        all_scores[i] += rep_scores
 
-    # Train Models
-    #agent = torch.load('trained_models/fourrooms/alt_run11/agent').to(device)
-    #emb_model = torch.load('trained_models/fourrooms/alt_run11/emb_model').to(device)
-
-    run_ea(n_generations, pop_size, pop_model, env, save_dir=save_dir)
+    from models.rl.utils import plt_exp_rewards
+    plt_exp_rewards(all_scores, save_dir=save_dir)
 
 def run_ea(n_generations, pop_size, pop_model, env, save_dir=None, **kwargs):
     '''
@@ -156,6 +153,7 @@ def run_ea(n_generations, pop_size, pop_model, env, save_dir=None, **kwargs):
     
     plot_progression(all_embs.numpy(), all_scores.numpy(), save_dir=os.path.join(save_dir, 'training_progression'))
 
+    return generation_scores
 
 def init_population(pop_model, pop_size):
 
@@ -204,7 +202,7 @@ def eval_pop(pop_embs, pop_model, env, track=False, **kwargs):
 
     return scores
 
-def score_fitness(emb, pop_model, env, max_ep_len=30, n_reps=20, **kwargs):
+def score_fitness(emb, pop_model, env, max_ep_len=15, n_reps=30, **kwargs):
 
     agent = GoalPolicyWrapper(goal_policy=pop_model.birth_model, emb=emb)
     ep_scores = torch.zeros(n_reps)
@@ -258,7 +256,9 @@ def play_episode(env, agent, max_ep_len, step_buffer=None, **kwargs):
 def select_children(parent_pop_embs, scores, pop_size, temp=1.):
     assert issubclass(type(parent_pop_embs), torch.Tensor) and issubclass(type(scores), torch.Tensor)
     assert isinstance(temp, float) and temp > 0.
-    selection_dist = Categorical(probs=softmax(scores / temp))
+    scores -= scores.min()
+    #selection_dist = Categorical(probs=softmax((scores - scores.min()) / temp))
+    selection_dist = Categorical(probs=scores / scores.sum())
     selected_inds = selection_dist.sample([pop_size, 2])
     selected_parents = parent_pop_embs[selected_inds]
 
@@ -337,7 +337,8 @@ def plot_progression(all_embs, all_scores, save_dir=None):
     for g in tqdm(range(n_gens)):
         # Plot all old embs first
         plt.clf()
-        fig, (ax1, ax2) = plt.subplots(1,2)
+        #fig, (ax1, ax2) = plt.subplots(1,2)
+        fig, ax1 = plt.subplots(1)
         ax1.scatter(embs_pca[:g*pop_size,0], embs_pca[:g*pop_size, 1], s=1, c=all_scores_flat[:g*pop_size], cmap='hot_r')
 
         # Plot current generation
@@ -349,17 +350,18 @@ def plot_progression(all_embs, all_scores, save_dir=None):
         ax1.set_xticks([])
         ax1.set_yticks([])
 
-        ax2.plot([i for i in range(g + 1)], avg_scores[:(g+1)], c='r')
-        # ['b'] * (g + 1) + ['w'] * (n_gens - g - 1)
-        ax2.set_xlim((0, n_gens))
-        ax2.set_ylim((-0.1, 1.1))
-        ax2.set_xticks([])
-        ax2.set_yticks([])
+        # ax2.plot([i for i in range(g + 1)], avg_scores[:(g+1)], c='r')
+        # # ['b'] * (g + 1) + ['w'] * (n_gens - g - 1)
+        # ax2.set_xlim((0, n_gens))
+        # #ax2.set_ylim((0, 1.1))
+        # ax2.set_xticks([])
+        # ax2.set_yticks([])
 
 
         fig.suptitle('Training Progression')
         fig.text(0.5, 0.01, 'Generation {}'.format(g), va='bottom', ha='center')
-        fig.set_figwidth(12)
+        #fig.set_figwidth(12)
+        fig.set_figwidth(8)
         fig.set_figheight(4)
         
         plt.savefig(os.path.join(save_dir, 'gen_{}'.format(g)))
@@ -407,6 +409,7 @@ def parse_args():
 
     # Data Arguments
     parser.add_argument('--env_name', type=str, default=None, choices=ENVS)
+    parser.add_argument('--n_exp_reps', help='number of replications', type=int, default=10)
 
     # Embedding Space Arguments
     parser.add_argument('--pop_model_name', help='which agent embedding to load', type=str, default=None)

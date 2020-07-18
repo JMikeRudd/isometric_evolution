@@ -33,7 +33,7 @@ from models.embedding.embedding_space import (
 from models.embedding.embedding_models import (
     MLPEmbMapping, ConvEmbMapping, DiscreteEmbMapping,
     IDEmbMapping, MixedEmbMapping, Scaled)
-from models.embedding.metrics import JSDAgentMetric
+from models.embedding.metrics import JSDAgentMetric, TVAgentMetric
 from models.embedding.distns import get_policy_distn
 from models.embedding.utils import set_req_grad, pca, sum_to_1
 
@@ -47,7 +47,7 @@ from models.rl.goal_directed_rl import GoalMDPWrapper, get_goal_mdp_wrapper
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def main(env_name, 
-         emb_space_type='euclidean', emb_dim=10,
+         emb_space_type='euclidean', emb_dim=10, metric_type='TV',
          state_emb_model_type='MLP', birth_model_hs=None, birth_lr=0.001,
          state_emb_layers=1, state_emb_hidden_size=12,
          unique_samples=2000, isom_epochs=10000, isom_bs=32, isom_lr=0.001,
@@ -106,7 +106,10 @@ def main(env_name,
                 unique_obs = torch.cat([unique_obs, new_obs.unsqueeze(0)])
 
     # Get distance metric
-    metric = JSDAgentMetric(unique_obs)
+    if metric_type == 'TV':
+        metric = TVAgentMetric(unique_obs)
+    elif metric_type == 'JSD':
+        metric = JSDAgentMetric(unique_obs)
 
     # Get embedding model
     emb_model = DiscreteEmbMapping(pop_size, emb_dim)
@@ -199,7 +202,7 @@ def emb_space_score_plots(pop_model, env, save_dir):
         assert len(pop_scores) == len(pop_embs)
     else:
         print('Computing Scores')
-        pop_scores = eval_pop(pop_embs, pop_model=pop_model, env=env, max_ep_len=15, n_reps=40, track=True)
+        pop_scores = eval_pop(pop_embs, pop_model=pop_model, env=env, max_ep_len=30, n_reps=30, track=True)
         torch.save(pop_scores, score_path)
 
     pop_embs, pop_scores = pop_embs.cpu().numpy(), pop_scores.cpu().numpy()
@@ -224,20 +227,23 @@ def emb_space_score_plots(pop_model, env, save_dir):
 
     # Projecting onto direction of steepest ascent
     from models.embedding.utils import get_gradient_steepest_ascent
-    d1vec, residuals = get_gradient_steepest_ascent(embs=pop_embs, signal=pop_scores)
+    d1vec, residuals, _ = get_gradient_steepest_ascent(embs=pop_embs, signal=pop_scores)
     d1 = pop_embs.dot(d1vec)
 
-    d2vec, _ = get_gradient_steepest_ascent(embs=pop_embs, signal=residuals)
+    d2vec, _, _ = get_gradient_steepest_ascent(embs=pop_embs, signal=residuals)
     d2 = pop_embs.dot(d2vec)
 
     best_emb_proj_1, best_emb_proj_2 = np.dot(best_emb, d1vec), np.dot(best_emb, d2vec)
 
     plt.scatter(d1, d2, c=pop_scores, cmap='hot_r', s=1)
     title = 'Embs Realigned by {}'.format(' Fitness Score')
-    plt.scatter(best_emb_proj_1, best_emb_proj_2, c='g')
+    #plt.scatter(best_emb_proj_1, best_emb_proj_2, c='g')
+    plt.xlabel('Axis of Steepest Ascent')
+    plt.ylabel('Residual Axis of Steepest Ascent')
     plt.title(title)
     plt.xticks([])
     plt.yticks([])
+    plt.colorbar()
     plt.savefig(os.path.join(save_dir, 'embs_score_projection'))
     plt.close()
 
@@ -251,9 +257,20 @@ def emb_space_score_plots(pop_model, env, save_dir):
 
     plt.bar(x=bins[:-1].cpu().numpy(), height=hist.cpu().numpy(), align='edge', width=(bins[1]-bins[0]).cpu().numpy())
     title = 'Histogram of {} Along Aligned Axis'.format('Fitness Scores')
+    plt.xlabel('Axis of Steepest Ascent')
     plt.ylabel('Average {}'.format('Fitness Score'))
     plt.title(title)
+    plt.xticks([])
     plt.savefig(os.path.join(save_dir, 'embs_score_histogram'))
+    plt.close()
+
+    plt.scatter(d1, pop_scores)
+    plt.title('Fitness Score vs. Axis of Steepest Ascent')
+    plt.ylabel('Fitness Score')
+    plt.xlabel('Axis of Steepest Ascent')
+    plt.xticks([])
+    plt.yticks([])
+    plt.savefig(os.path.join(save_dir, 'scores_best_dim'))
     plt.close()
 
 
@@ -572,12 +589,10 @@ def parse_args():
                         help='what type of embedding space to use',
                         type=str, default='euclidean',
                         choices=EMBEDDING_SPACES)
-    '''
     parser.add_argument('--metric_type',
                         help='what type of metric to use on real data',
-                        type=str, default='euclidean',
-                        choices=METRICS)
-    '''
+                        type=str, default='TV',
+                        choices=['TV', 'JSD'])
 
     # Birth Model Arguments
     parser.add_argument('--state_emb_model_type',

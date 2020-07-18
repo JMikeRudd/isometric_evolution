@@ -38,7 +38,7 @@ class PopModel(torch.nn.Module):
         self.pop_embs = self.emb_model.model.weight.data
 
 
-    def init_embs(self, lap_k=0.03, epochs=10000, bs=100, optim=None, save_dir=None):
+    def init_embs(self, lap_k=0.0, epochs=10000, bs=100, optim=None, save_dir=None):
 
         assert save_dir is not None
         if not os.path.exists(save_dir):

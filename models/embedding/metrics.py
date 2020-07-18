@@ -152,6 +152,20 @@ class JSDAgentMetric(AgentMetric):
         return {}
 
 
+class TVAgentMetric(AgentMetric):
+    ''' Metric defined on agents. Total variation.
+    '''
+    def __init__(self, unique_obs):
+        super().__init__(unique_obs, TVAgentMetric.TV)
+
+    @staticmethod
+    def TV(x_pol, y_pol):
+        return (x_pol - y_pol).abs().max(dim=-1)[0]
+
+    def update_metric(self, batch):
+        return {}
+
+
 class TableMetric(Metric):
     ''' Metric is a lookup table of distances
     '''

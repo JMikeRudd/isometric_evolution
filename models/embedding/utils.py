@@ -149,7 +149,9 @@ def isomap_coords(D, emb_dim, save_dir=None):
         plt.close()
 
         # plot eigenvalues
-        plt.bar([i for i in range(len(eigvals))], eigvals)
+        eig_val_dim = min(2*emb_dim, len(eigvals))
+        plt.bar([i for i in range(eig_val_dim)], np.abs(eigvals[:eig_val_dim]))
+        #plt.title('Genotype Embedding Eigenvalues')
         plt.savefig(os.path.join(save_dir, 'isomap_eigvals'))
         plt.close()
 
@@ -284,18 +286,22 @@ def images_to_gif(img_dir, file_names, out_name, fps=24):
 
 
 def get_gradient_steepest_ascent(embs, signal, norm=True):
-    from sklearn.linear_model import LinearRegression
+    import statsmodels.api as sm
     import numpy as np
 
     assert issubclass(type(embs), np.ndarray) and issubclass(type(signal), np.ndarray)
     assert embs.shape[0] == signal.shape[0]
 
-    reg_model = LinearRegression()
-    reg_model.fit(embs, signal)
-    steepvec = reg_model.coef_
+    reg_model = sm.OLS(signal, embs).fit()
+    # reg_model = LinearRegression()
+    # reg_model.fit(embs, signal)
+    steepvec = reg_model.params
     signal_res = signal - reg_model.predict(embs)
+
+    p_val = reg_model.f_pvalue
+    p_val = p_val if not np.isnan(p_val) else 1.
 
     if norm:
         steepvec /= np.linalg.norm(steepvec)
     
-    return steepvec, signal_res
+    return steepvec, signal_res, p_val

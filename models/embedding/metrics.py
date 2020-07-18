@@ -68,7 +68,7 @@ class EuclideanMetric(Metric):
         super().__init__(dim)
 
     def _compute_dist(self, x, y):
-        return ((x - y) ** 2).sum(dim=-1)
+        return ((x - y) ** 2).sum(dim=-1).pow(0.5)
 
     def update_metric(self, batch):
         return {}
@@ -147,6 +147,20 @@ class JSDAgentMetric(AgentMetric):
     @staticmethod
     def _kl(pol1, pol2):
         return (pol1 * (pol1.log() - pol2.log())).sum(dim=-1)
+
+    def update_metric(self, batch):
+        return {}
+
+
+class TVAgentMetric(AgentMetric):
+    ''' Metric defined on agents. Total variation.
+    '''
+    def __init__(self, unique_obs):
+        super().__init__(unique_obs, TVAgentMetric.TV)
+
+    @staticmethod
+    def TV(x_pol, y_pol):
+        return (x_pol - y_pol).abs().max(dim=-1)[0]
 
     def update_metric(self, batch):
         return {}

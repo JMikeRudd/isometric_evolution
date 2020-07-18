@@ -129,6 +129,35 @@ def sum_to_1(tens):
         tens = tens.sum(dim=-1)
     return tens
 
+
+def isomap_coords(D, emb_dim, save_dir=None):
+    import numpy as np
+
+    device = D.device.type
+    n_pts = D.size(0)
+    center_mat = (torch.eye(n_pts) - (torch.ones(n_pts, n_pts) / float(n_pts))).to(device)
+    B = -0.5 * center_mat.matmul(D.pow(2).to(device)).matmul(center_mat)
+
+    eigvals, eigvecs = np.linalg.eig(B.cpu().numpy())
+    coords = np.dot(eigvecs[:,:emb_dim].real, np.diag(np.sqrt(eigvals[:emb_dim].real)))
+
+    if save_dir is not None:
+        from matplotlib import pyplot as plt
+        # plot coordinates
+        plt.scatter(coords[:,0], coords[:,1], s=1)
+        plt.savefig(os.path.join(save_dir, 'isomap_coords'))
+        plt.close()
+
+        # plot eigenvalues
+        eig_val_dim = min(2*emb_dim, len(eigvals))
+        plt.bar([i for i in range(eig_val_dim)], np.abs(eigvals[:eig_val_dim]))
+        #plt.title('Genotype Embedding Eigenvalues')
+        plt.savefig(os.path.join(save_dir, 'isomap_eigvals'))
+        plt.close()
+
+    return torch.tensor(coords).float()
+
+
 def plt_pca_coords(embs, dim=2, save_dir=None, save_name='learned_coords'):
     import numpy as np
     from matplotlib import pyplot as plt
@@ -240,3 +269,39 @@ class MixedDataset(Dataset):
                 item = item[0]
             ret_dict[k] = item
         return ret_dict
+
+def images_to_gif(img_dir, file_names, out_name, fps=24):
+    import os
+    import imageio
+
+    assert os.path.exists(img_dir)
+    assert isinstance(file_names, list)
+
+    images = []
+    for file_name in file_names:
+        assert file_name.endswith('.png')
+        file_path = os.path.join(img_dir, file_name)
+        images.append(imageio.imread(file_path))
+    imageio.mimsave(os.path.join(img_dir, '{}.gif'.format(out_name)), images, fps=fps)
+
+
+def get_gradient_steepest_ascent(embs, signal, norm=True):
+    import statsmodels.api as sm
+    import numpy as np
+
+    assert issubclass(type(embs), np.ndarray) and issubclass(type(signal), np.ndarray)
+    assert embs.shape[0] == signal.shape[0]
+
+    reg_model = sm.OLS(signal, embs).fit()
+    # reg_model = LinearRegression()
+    # reg_model.fit(embs, signal)
+    steepvec = reg_model.params
+    signal_res = signal - reg_model.predict(embs)
+
+    p_val = reg_model.f_pvalue
+    p_val = p_val if not np.isnan(p_val) else 1.
+
+    if norm:
+        steepvec /= np.linalg.norm(steepvec)
+    
+    return steepvec, signal_res, p_val
